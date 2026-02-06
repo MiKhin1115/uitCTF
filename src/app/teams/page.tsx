@@ -2,65 +2,78 @@
 
 import { useEffect, useState } from "react";
 import EventNavbar from "../components/EventNavbar";
+import { useRequireTeam } from "../components/useRequireTeam";
 
-type Team = { _id: string; name: string; ownerId: string; members: string[] };
+type Team = {
+  _id: string;
+  name: string;
+  ownerId: string;
+  members: { userId: string; username: string }[];
+  createdAt?: string;
+};
 
 export default function TeamsPage() {
+  const { loading } = useRequireTeam();
   const [teams, setTeams] = useState<Team[]>([]);
-  const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  async function load() {
+  async function loadTeams() {
+    setErr(null);
     const res = await fetch("/api/teams", { cache: "no-store" });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setErr(data?.error || "Failed to load teams");
+      return;
+    }
     setTeams(data.teams || []);
   }
 
-  async function requestJoin(teamId: string) {
-    setErr(null);
-    setMsg(null);
-
-    const res = await fetch(`/api/teams/${teamId}/join`, { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) {
-      setErr(data?.error || "Failed");
-      return;
-    }
-    setMsg("Join request sent ✅ (waiting for owner approval)");
-  }
-
   useEffect(() => {
-    load();
-  }, []);
+    if (!loading) loadTeams();
+  }, [loading]);
+
+  if (loading) return null;
 
   return (
     <main className="min-h-screen bg-black text-white">
       <EventNavbar />
 
       <section className="mx-auto max-w-6xl px-6 py-12">
-        <h1 className="text-3xl font-bold text-[#077c8a]">Teams</h1>
-        <p className="mt-2 text-white/70">Request to join a team. The team owner must accept.</p>
+        <h1 className="text-3xl font-bold">
+          <span className="text-white">Event </span>
+          <span className="text-[#077c8a]">Teams</span>
+        </h1>
+        <p className="mt-2 text-white/70">Teams participating in this event.</p>
 
-        {(err || msg) && (
-          <div className={`mt-6 rounded-2xl border p-4 text-sm ${err ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-[#077c8a]/30 bg-[#077c8a]/10 text-white/90"}`}>
-            {err ?? msg}
+        {err && (
+          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+            {err}
           </div>
         )}
 
-        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {teams.map((t) => (
-            <div key={t._id} className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 hover:border-[#1493a0]/70 transition">
-              <div className="text-lg font-semibold">{t.name}</div>
-              <div className="mt-2 text-sm text-white/60">Members: {t.members?.length ?? 0}</div>
+            <div
+              key={t._id}
+              className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 hover:border-[#1493a0]/60 transition"
+            >
+              <div className="text-lg font-semibold text-white/90">{t.name}</div>
+              <div className="mt-2 text-sm text-white/60">
+                Members: <span className="text-white/80">{t.members?.length || 0}</span>
+              </div>
 
-              <button
-                onClick={() => requestJoin(t._id)}
-                className="mt-5 w-full rounded-xl bg-[#077c8a] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition"
-              >
-                Request Join
-              </button>
+              {t.members?.length > 0 && (
+                <div className="mt-3 text-xs text-white/55">
+                  {t.members.slice(0, 5).map((m) => m.username).join(", ")}
+                  {t.members.length > 5 ? " ..." : ""}
+                </div>
+              )}
             </div>
           ))}
+
+          {teams.length === 0 && !err && (
+            <div className="text-white/60">No teams yet.</div>
+          )}
         </div>
       </section>
     </main>

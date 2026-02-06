@@ -1,21 +1,27 @@
-import mongoose, { Schema, type Model } from "mongoose";
+import mongoose, { Schema, models } from "mongoose";
 
-export interface ITeam {
-  name: string;
-  ownerId: string;        // User._id
-  members: string[];      // user ids
-  createdAt?: Date;
-  updatedAt?: Date;
-}
-
-const TeamSchema = new Schema<ITeam>(
+const MemberSchema = new Schema(
   {
-    name: { type: String, required: true, unique: true, trim: true },
-    ownerId: { type: String, required: true, index: true },
-    members: { type: [String], default: [] },
+    userId: { type: String, required: true },
+    username: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const TeamSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true, unique: true },
+    ownerId: { type: String, required: true },
+
+    // 🔐 team password (hashed)
+    passwordHash: { type: String, required: true },
+
+    // 🎟 invitation token to join
+    inviteToken: { type: String, required: true, unique: true },
+
+    members: { type: [MemberSchema], default: [] },
   },
   { timestamps: true }
 );
 
-export const Team: Model<ITeam> =
-  mongoose.models.Team || mongoose.model<ITeam>("Team", TeamSchema);
+export const Team = models.Team || mongoose.model("Team", TeamSchema);
