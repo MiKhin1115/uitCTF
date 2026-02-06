@@ -32,6 +32,18 @@ function shortLabel(c: string) {
   return c;
 }
 
+function difficultyFromPoints(points: number) {
+  if (points <= 120) return "EASY";
+  if (points <= 220) return "MEDIUM";
+  return "HARD";
+}
+
+function diffBadgeClass(diff: "EASY" | "MEDIUM" | "HARD") {
+  if (diff === "EASY") return "bg-emerald-500/15 text-emerald-300 border-emerald-500/20";
+  if (diff === "MEDIUM") return "bg-yellow-500/15 text-yellow-300 border-yellow-500/20";
+  return "bg-red-500/15 text-red-300 border-red-500/20";
+}
+
 export default function ChallengesPage() {
   const { loading } = useRequireTeam();
 
@@ -139,11 +151,13 @@ export default function ChallengesPage() {
       <EventNavbar />
 
       <section className="mx-auto max-w-6xl px-6 py-12">
-        <h1 className="text-3xl font-bold">
-          <span className="text-white">CTF </span>
-          <span className="text-[#077c8a]">Challenges</span>
-        </h1>
-        <p className="mt-2 text-white/70">Click a challenge to solve it.</p>
+        <div className="text-center">
+          <h1 className="text-3xl font-bold">
+            <span className="text-white">CTF </span>
+            <span className="text-[#077c8a]">Challenges</span>
+          </h1>
+          <p className="mt-2 text-white/70">Click a challenge to solve it.</p>
+        </div>
 
         {err && (
           <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
@@ -168,42 +182,67 @@ export default function ChallengesPage() {
           ))}
         </div>
 
-        {/* ✅ NEW TILE GRID (like screenshot) */}
-        <div className="mt-10 grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {filtered.map((ch) => (
-            <button
-              key={ch._id}
-              onClick={() => openSolve(ch)}
-              className={[
-                "group relative h-16 rounded-md border text-left transition",
-                "px-3 py-2",
-                // base tile look
-                "bg-white/[0.06] border-white/15 hover:bg-white/[0.08]",
-                // hover glow
-                "hover:border-[#1493a0]/60 hover:shadow-[0_0_0_1px_rgba(20,147,160,0.25)]",
-                // solved state
-                ch.solved
-                  ? "bg-[#077c8a]/18 border-[#077c8a]/60 shadow-[0_0_0_1px_rgba(7,124,138,0.25)]"
-                  : "",
-              ].join(" ")}
-              title={`${ch.title} • ${ch.points} pts`}
-            >
-              {/* Title (center-ish like tiles) */}
-              <div className="w-full truncate text-center text-sm font-semibold text-white/90">
-                {ch.title}
-              </div>
+        {/* ✅ Card UI like screenshot */}
+        <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((ch) => {
+            const diff = difficultyFromPoints(ch.points) as "EASY" | "MEDIUM" | "HARD";
 
-              {/* Points */}
-              <div className="mt-1 text-center text-[11px] text-white/70">
-                {ch.points} pts
-              </div>
+            return (
+              <button
+                key={ch._id}
+                onClick={() => openSolve(ch)}
+                className={[
+                  "group relative w-full overflow-hidden rounded-3xl border text-left transition",
+                  "bg-white/[0.04] border-white/10 hover:bg-white/[0.06]",
+                  "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]",
+                  "hover:border-[#1493a0]/45 hover:shadow-[0_0_0_1px_rgba(20,147,160,0.20)]",
+                  ch.solved
+                    ? "border-[#077c8a]/50 bg-[#077c8a]/10 shadow-[0_0_0_1px_rgba(7,124,138,0.20)]"
+                    : "",
+                ].join(" ")}
+              >
+                <div className="p-7">
+                  {/* Top row: difficulty + points */}
+                  <div className="flex items-start justify-between">
+                    <span
+                      className={[
+                        "inline-flex items-center rounded-xl border px-3 py-1 text-xs font-bold tracking-wide",
+                        diffBadgeClass(diff),
+                      ].join(" ")}
+                    >
+                      {diff}
+                    </span>
 
-              {/* tiny solved dot */}
-              {ch.solved && (
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#077c8a]" />
-              )}
-            </button>
-          ))}
+                    <span className="text-sm font-semibold text-[#077c8a]">
+                      {ch.points} pts
+                    </span>
+                  </div>
+
+                  {/* Title */}
+                  <div className="mt-6 text-2xl font-bold text-white">
+                    {ch.title}
+                  </div>
+
+                  {/* Category */}
+                  <div className="mt-2 text-base text-white/65">{ch.category}</div>
+
+                  {/* Solved (bottom right like screenshot vibe) */}
+                  <div className="mt-10 flex justify-end">
+                    {ch.solved ? (
+                      <span className="text-sm font-bold tracking-widest text-emerald-400">
+                        SOLVED
+                      </span>
+                    ) : (
+                      <span className="text-sm font-bold tracking-widest text-white/20">
+                        {/* keep spacing consistent */}
+                        &nbsp;
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
 
           {filtered.length === 0 && !err && (
             <div className="text-white/60">No challenges in this category yet.</div>

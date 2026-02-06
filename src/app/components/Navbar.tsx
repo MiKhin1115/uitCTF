@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { FaFlag, FaBookOpen, FaTrophy, FaArrowRight, FaUserCircle } from "react-icons/fa";
 
@@ -36,14 +37,16 @@ export default function Navbar() {
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         {/* Left: Logo */}
         <div className="flex items-center gap-3">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 ring-1 ring-white/10">
-            <FlagIcon className="h-6 w-6 text-[#077c8a]" />
-          </span>
+          <Link href="/" className="flex items-center gap-3">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 ring-1 ring-white/10">
+              <FlagIcon className="h-6 w-6 text-[#077c8a]" />
+            </span>
 
-          <div className="text-xl font-semibold tracking-tight">
-            <span className="text-[#077c8a]">UIT</span>
-            <span className="text-white/90">ctf</span>
-          </div>
+            <span className="text-lg font-bold tracking-tight">
+              <span className="text-[#077c8a]">UIT</span>
+              <span className="text-white">CTF</span>
+            </span>
+          </Link>
         </div>
 
         {/* Middle nav */}

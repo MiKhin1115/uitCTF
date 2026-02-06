@@ -1,57 +1,63 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { FiUploadCloud, FiFileText, FiX } from "react-icons/fi";
+import { useEffect, useMemo, useState } from "react";
 
-type FileItem = { fileId: string; filename: string; size: number; contentType: string };
-type Challenge = {
+type ChallengeRow = {
   _id: string;
   title: string;
-  description?: string;
-  points: number;
   category: string;
-  files: FileItem[];
+  points: number;
+  startsAt: string;
+  endsAt: string;
+  files?: { filename: string; size: number; fileId: string }[];
 };
 
-const categories = [
-  "Web Exploitation",
-  "Cryptography",
-  "Forensics",
-  "Pwn",
-  "Reverse Engineering",
-  "OSINT",
-  "Misc",
-  "Steganography",
-];
+function fmtLocal(dt: string | Date) {
+  const d = typeof dt === "string" ? new Date(dt) : dt;
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString();
+}
 
 export default function AdminChallengesPage() {
   const [token, setToken] = useState("");
-  const [items, setItems] = useState<Challenge[]>([]);
+  const [loadedToken, setLoadedToken] = useState("");
+
+  const [list, setList] = useState<ChallengeRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   // create form
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
   const [points, setPoints] = useState(100);
-  const [category, setCategory] = useState(categories[0]);
-
-  // flag
+  const [category, setCategory] = useState("Web Exploitation");
+  const [description, setDescription] = useState("");
   const [flag, setFlag] = useState("");
   const [showFlag, setShowFlag] = useState(false);
 
-  // ✅ multiple files in create form
+  // ✅ schedule
+  const [startsAt, setStartsAt] = useState("");
+  const [endsAt, setEndsAt] = useState("");
+
+  // files
   const [createFiles, setCreateFiles] = useState<File[]>([]);
+
+  useEffect(() => {
+    const t = localStorage.getItem("ADMIN_TOKEN") || "";
+    if (t) {
+      setToken(t);
+      setLoadedToken(t);
+    }
+  }, []);
 
   async function api(path: string, init?: RequestInit) {
     const res = await fetch(path, {
       ...init,
       headers: {
-        "Content-Type": "application/json",
-        "x-admin-token": token,
         ...(init?.headers || {}),
+        "x-admin-token": loadedToken,
       },
+      cache: "no-store",
     });
 
     const text = await res.text();
@@ -61,7 +67,6 @@ export default function AdminChallengesPage() {
     } catch {
       data = { error: text || "Non-JSON response" };
     }
-
     if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
     return data;
   }
@@ -69,10 +74,12 @@ export default function AdminChallengesPage() {
   async function load() {
     setErr(null);
     setMsg(null);
+    if (!loadedToken) return;
+
     setLoading(true);
     try {
       const data = await api("/api/admin/challenges");
-      setItems(data.challenges || []);
+      setList(data.challenges || []);
     } catch (e: any) {
       setErr(e?.message || "Failed to load challenges");
     } finally {
@@ -81,173 +88,153 @@ export default function AdminChallengesPage() {
   }
 
   useEffect(() => {
-    if (token.trim()) load();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [loadedToken]);
 
-  // ✅ upload one OR many files for an existing challenge (uses FormData key "files")
-  async function uploadMany(challengeId: string, files: FileList | null) {
-    if (!files || files.length === 0) return;
-
-    const fd = new FormData();
-    Array.from(files).forEach((f) => fd.append("files", f));
-
-    const res = await fetch(`/api/admin/challenges/${challengeId}/files`, {
-      method: "POST",
-      headers: { "x-admin-token": token },
-      body: fd,
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || "Upload failed");
+  function saveToken() {
+    localStorage.setItem("ADMIN_TOKEN", token.trim());
+    setLoadedToken(token.trim());
+    setMsg("Admin token loaded ✅");
+    setErr(null);
   }
 
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
+  async function createChallenge() {
     setErr(null);
     setMsg(null);
-    setLoading(true);
+
+    if (!loadedToken) {
+      setErr("Please load ADMIN_TOKEN first.");
+      return;
+    }
 
     try {
-      const t = title.trim();
-      const d = description.trim();
-      const f = flag.trim();
+      const body = {
+        title,
+        points,
+        category,
+        description,
+        flag,
+        startsAt,
+        endsAt,
+      };
 
-      if (!t || t.length < 3) throw new Error("Title must be at least 3 characters.");
-      if (!d || d.length < 5) throw new Error("Description is required.");
-      if (!Number.isFinite(points) || points < 0) throw new Error("Points must be valid.");
-      if (!f || f.length < 4) throw new Error("Flag is required.");
-
-      // 1) Create challenge
       const created = await api("/api/admin/challenges", {
         method: "POST",
-        body: JSON.stringify({ title: t, description: d, points, category, flag: f }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
 
-      const newId: string | undefined = created?.challenge?._id;
-      if (!newId) throw new Error("Challenge created but id not returned.");
+      const newId = created?.challenge?._id as string | undefined;
 
-      // 2) Upload selected files (many)
-      if (createFiles.length > 0) {
+      // upload files (optional)
+      if (newId && createFiles.length > 0) {
         const fd = new FormData();
-        createFiles.forEach((file) => fd.append("files", file));
+        createFiles.forEach((f) => fd.append("files", f));
 
-        const res = await fetch(`/api/admin/challenges/${newId}/files`, {
+        await fetch(`/api/admin/challenges/${newId}/files`, {
           method: "POST",
-          headers: { "x-admin-token": token },
+          headers: { "x-admin-token": loadedToken },
           body: fd,
         });
-
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.error || "File upload failed");
       }
 
-      setMsg(createFiles.length > 0 ? "Challenge + files created ✅" : "Challenge created ✅");
-
-      // reset form
+      setMsg("Challenge created ✅");
       setTitle("");
-      setDescription("");
       setPoints(100);
-      setCategory(categories[0]);
+      setCategory("Web Exploitation");
+      setDescription("");
       setFlag("");
-      setShowFlag(false);
+      setStartsAt("");
+      setEndsAt("");
       setCreateFiles([]);
-
       await load();
     } catch (e: any) {
       setErr(e?.message || "Create failed");
-    } finally {
-      setLoading(false);
     }
   }
 
-  async function del(id: string) {
-    if (!confirm("Delete this challenge?")) return;
-    setErr(null);
-    setMsg(null);
-    setLoading(true);
-    try {
-      await api(`/api/admin/challenges/${id}`, { method: "DELETE" });
-      setMsg("Deleted ✅");
-      await load();
-    } catch (e: any) {
-      setErr(e?.message || "Delete failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const removeSelectedCreateFile = (key: string) => {
-    setCreateFiles((prev) => prev.filter((f) => `${f.name}:${f.size}` !== key));
-  };
+  const categories = useMemo(
+    () => [
+      "Web Exploitation",
+      "Cryptography",
+      "Forensics",
+      "Pwn",
+      "Reverse Engineering",
+      "OSINT",
+      "Misc",
+      "Steganography",
+    ],
+    []
+  );
 
   return (
     <main className="min-h-screen bg-black text-white">
-      <div className="mx-auto max-w-6xl px-6 py-12">
+      <section className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-3xl font-bold">
           <span className="text-white">Admin </span>
           <span className="text-[#077c8a]">Challenges</span>
         </h1>
+        <p className="mt-2 text-white/60">Create challenges with schedule windows.</p>
 
-        {/* Admin Token */}
-        <div className="mt-6 rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-          <label className="block text-sm font-medium text-white/80">Admin Token</label>
-          <input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-[#1493a0]/70"
-            placeholder="Paste ADMIN_TOKEN here"
-          />
-
-          <div className="mt-4 flex items-center gap-3">
+        {/* Token */}
+        <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+          <div className="text-sm font-semibold text-white/80">Admin Token</div>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <input
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Paste ADMIN_TOKEN here"
+              className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-[#077c8a]/60"
+            />
             <button
-              onClick={load}
-              className="rounded-xl bg-[#077c8a] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition"
+              onClick={saveToken}
+              className="rounded-2xl bg-[#077c8a] px-6 py-3 text-sm font-semibold text-white hover:opacity-90"
             >
               Load
             </button>
-            <span className="ml-auto text-sm text-white/60">
-              {loading ? "Working..." : `${items.length} challenges`}
-            </span>
           </div>
-
-          {(err || msg) && (
-            <div
-              className={`mt-4 rounded-2xl border p-3 text-sm ${
-                err
-                  ? "border-red-500/30 bg-red-500/10 text-red-200"
-                  : "border-[#077c8a]/30 bg-[#077c8a]/10 text-white/90"
-              }`}
-            >
-              {err ?? msg}
-            </div>
-          )}
+          <div className="mt-3 text-sm text-white/60">
+            {loading ? "Loading..." : `${list.length} challenge(s)`}
+          </div>
         </div>
 
-        {/* Create Challenge */}
-        <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-          <h2 className="text-lg font-semibold">Create Challenge</h2>
+        {msg && (
+          <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+            {msg}
+          </div>
+        )}
+        {err && (
+          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+            {err}
+          </div>
+        )}
 
-          <form onSubmit={create} className="mt-4 grid gap-4 sm:grid-cols-2">
+        {/* Create */}
+        <div className="mt-10 rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+          <h2 className="text-xl font-bold">Create Challenge</h2>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Challenge title"
-              className="rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-[#1493a0]/70"
+              className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-[#077c8a]/60"
             />
-
             <input
               value={points}
               onChange={(e) => setPoints(Number(e.target.value))}
-              placeholder="Points"
               type="number"
-              className="rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-[#1493a0]/70"
+              placeholder="Points"
+              className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-[#077c8a]/60"
             />
+          </div>
 
+          <div className="mt-4">
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-[#1493a0]/70 sm:col-span-2"
+              className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-[#077c8a]/60"
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
@@ -255,190 +242,167 @@ export default function AdminChallengesPage() {
                 </option>
               ))}
             </select>
+          </div>
 
+          {/* ✅ schedule inputs */}
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="text-sm text-white/70">Starts at</label>
+              <input
+                type="datetime-local"
+                value={startsAt}
+                onChange={(e) => setStartsAt(e.target.value)}
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-[#077c8a]/60"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-white/70">Ends at</label>
+              <input
+                type="datetime-local"
+                value={endsAt}
+                onChange={(e) => setEndsAt(e.target.value)}
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-[#077c8a]/60"
+              />
+            </div>
+          </div>
+
+          <div className="mt-4">
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Description"
-              className="min-h-[120px] rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-[#1493a0]/70 sm:col-span-2"
+              className="h-36 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-[#077c8a]/60"
+            />
+          </div>
+
+          {/* Flag */}
+          <div className="mt-4">
+            <label className="text-sm font-semibold text-white/80">Flag</label>
+            <div className="mt-2 flex gap-3">
+              <input
+                value={flag}
+                onChange={(e) => setFlag(e.target.value)}
+                type={showFlag ? "text" : "password"}
+                placeholder="Flag (stored hashed)"
+                className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-[#077c8a]/60"
+              />
+              <button
+                onClick={() => setShowFlag((p) => !p)}
+                className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/80 hover:bg-white/10"
+              >
+                {showFlag ? "Hide" : "Show"}
+              </button>
+            </div>
+            <div className="mt-2 text-xs text-white/50">Flag is stored securely (hashed).</div>
+          </div>
+
+          {/* Files UI (optional) */}
+          <div className="mt-6">
+            <div className="text-sm font-semibold text-white/80">Challenge Files (optional)</div>
+
+            <label
+              htmlFor="challenge-files"
+              className="mt-3 flex cursor-pointer items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 hover:bg-white/[0.05] transition"
+            >
+              <div className="flex items-center gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/5 ring-1 ring-white/10">
+                  ⬆️
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">
+                    {createFiles.length ? `${createFiles.length} file(s) selected` : "Upload files"}
+                  </div>
+                  <div className="text-xs text-white/55">Binary/zip/pdf (max 10MB each)</div>
+                </div>
+              </div>
+              <div className="text-sm text-white/60">Browse</div>
+            </label>
+
+            <input
+              id="challenge-files"
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const picked = Array.from(e.target.files || []);
+                if (picked.length === 0) return;
+
+                setCreateFiles((prev) => {
+                  const map = new Map(prev.map((f) => [f.name + ":" + f.size, f]));
+                  for (const f of picked) map.set(f.name + ":" + f.size, f);
+                  return Array.from(map.values());
+                });
+
+                e.currentTarget.value = "";
+              }}
             />
 
-            {/* Flag */}
-            <div className="sm:col-span-2">
-              <label className="mb-2 block text-sm font-medium text-white/80">Flag</label>
-              <div className="flex gap-2">
-                <input
-                  value={flag}
-                  onChange={(e) => setFlag(e.target.value)}
-                  type={showFlag ? "text" : "password"}
-                  placeholder="UITCTF{...}"
-                  className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-[#1493a0]/70"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowFlag((v) => !v)}
-                  className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white/80 hover:bg-white/10 transition"
-                >
-                  {showFlag ? "Hide" : "Show"}
-                </button>
-              </div>
-              <p className="mt-2 text-xs text-white/50">Flag is stored securely (hashed).</p>
-            </div>
-
-            {/* Multi-file upload (CREATE) with additive selection */}
-            <div className="sm:col-span-2">
-              <label className="mb-2 block text-sm font-medium text-white/80">
-                Challenge Files (optional)
-              </label>
-
-              <input
-                id="challenge-files"
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  const picked = Array.from(e.target.files || []);
-                  if (picked.length === 0) return;
-
-                  setCreateFiles((prev) => {
-                    const map = new Map(prev.map((f) => [`${f.name}:${f.size}`, f]));
-                    for (const f of picked) map.set(`${f.name}:${f.size}`, f); // avoid duplicates
-                    return Array.from(map.values());
-                  });
-
-                  // allow selecting again later
-                  e.currentTarget.value = "";
-                }}
-              />
-
-              <label
-                htmlFor="challenge-files"
-                className="group flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/12 bg-white/[0.05] px-4 py-3 text-white/85 transition hover:border-[#1493a0]/60 hover:bg-white/[0.07]"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 ring-1 ring-white/10">
-                    <FiUploadCloud className="h-5 w-5 text-[#077c8a]" />
-                  </span>
-
-                  <div className="leading-tight">
-                    <div className="text-sm font-semibold">
-                      {createFiles.length > 0
-                        ? `${createFiles.length} file(s) selected`
-                        : "Add files"}
+            {createFiles.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {createFiles.map((f) => (
+                  <div
+                    key={f.name + f.size}
+                    className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3"
+                  >
+                    <div className="text-sm text-white/85">
+                      📄 {f.name}{" "}
+                      <span className="text-white/50">
+                        ({Math.round(f.size / 1024)} KB)
+                      </span>
                     </div>
-                    <div className="text-xs text-white/55">Binary/zip/pdf (max 10MB each)</div>
+                    <button
+                      onClick={() =>
+                        setCreateFiles((prev) => prev.filter((x) => x !== f))
+                      }
+                      className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 hover:bg-white/10"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={createChallenge}
+            className="mt-6 w-full rounded-2xl bg-[#077c8a] py-4 text-sm font-bold text-white hover:opacity-90"
+          >
+            Create
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="mt-10 rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+          <h2 className="text-xl font-bold">All Challenges</h2>
+
+          <div className="mt-6 space-y-3">
+            {list.map((ch) => (
+              <div
+                key={ch._id}
+                className="rounded-2xl border border-white/10 bg-black/30 p-5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-bold">{ch.title}</div>
+                    <div className="mt-1 text-sm text-white/60">
+                      {ch.category} • {ch.points} pts
+                    </div>
+                    <div className="mt-2 text-xs text-white/50">
+                      ⏱ {fmtLocal(ch.startsAt)} → {fmtLocal(ch.endsAt)}
+                    </div>
                   </div>
                 </div>
+              </div>
+            ))}
 
-                <div className="text-xs font-semibold text-white/55 group-hover:text-white/70">
-                  Browse
-                </div>
-              </label>
-
-              {/* Selected files list */}
-              {createFiles.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {createFiles.map((f) => {
-                    const key = `${f.name}:${f.size}`;
-                    return (
-                      <div
-                        key={key}
-                        className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2"
-                      >
-                        <div className="flex min-w-0 items-center gap-2 text-sm text-white/80">
-                          <FiFileText className="shrink-0 text-[#077c8a]" />
-                          <span className="truncate">{f.name}</span>
-                          <span className="shrink-0 text-xs text-white/45">
-                            ({Math.ceil(f.size / 1024)} KB)
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => removeSelectedCreateFile(key)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white transition"
-                          title="Remove"
-                        >
-                          <FiX />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <button
-              disabled={loading}
-              className="rounded-xl bg-[#077c8a] px-5 py-3 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-60 sm:col-span-2"
-            >
-              {loading ? "Creating..." : "Create"}
-            </button>
-          </form>
+            {list.length === 0 && (
+              <div className="py-8 text-center text-white/60">No challenges yet.</div>
+            )}
+          </div>
         </div>
-
-        {/* List of Challenges + Upload more files after creation */}
-        <div className="mt-8 grid gap-6 sm:grid-cols-2">
-          {items.map((ch) => (
-            <div key={ch._id} className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-lg font-semibold">{ch.title}</div>
-                  <div className="mt-1 text-sm text-white/60">{ch.category}</div>
-                </div>
-                <div className="rounded-xl bg-white/5 px-3 py-1 text-sm text-white/80">
-                  {ch.points} pts
-                </div>
-              </div>
-
-              {/* Upload more files for this challenge */}
-              <div className="mt-4">
-                <label className="text-sm font-semibold text-white/80">Upload more files</label>
-                <input
-                  type="file"
-                  multiple
-                  className="mt-2 block w-full text-sm text-white/70"
-                  onChange={async (e) => {
-                    try {
-                      await uploadMany(ch._id, e.target.files);
-                      setMsg("Files uploaded ✅");
-                      await load();
-                    } catch (er: any) {
-                      setErr(er?.message || "Upload failed");
-                    } finally {
-                      e.currentTarget.value = "";
-                    }
-                  }}
-                />
-              </div>
-
-              {ch.files?.length > 0 && (
-                <div className="mt-4 text-sm text-white/70">
-                  <div className="font-semibold text-white/80">Files</div>
-                  <ul className="mt-2 list-disc pl-5">
-                    {ch.files.map((f) => (
-                      <li key={f.fileId}>{f.filename}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="mt-5">
-                <button
-                  onClick={() => del(ch._id)}
-                  className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/15 transition"
-                >
-                  Delete Challenge
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {items.length === 0 && (
-            <div className="text-white/60">No challenges yet. Create one above.</div>
-          )}
-        </div>
-      </div>
+      </section>
     </main>
   );
 }

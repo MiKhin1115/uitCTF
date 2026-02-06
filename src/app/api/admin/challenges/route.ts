@@ -1,70 +1,95 @@
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { requireAdmin } from "@/lib/adminAuth";
 import { connectMongo } from "@/lib/mongodb";
 import { Challenge } from "@/models/Challenge";
-import { requireAdmin } from "@/lib/adminAuth";
-import bcrypt from "bcryptjs";
+
+const CATEGORIES = new Set([
+  "Web Exploitation",
+  "Cryptography",
+  "Forensics",
+  "Pwn",
+  "Reverse Engineering",
+  "OSINT",
+  "Misc",
+  "Steganography",
+]);
 
 export async function GET(req: Request) {
   const denied = requireAdmin(req);
   if (denied) return denied;
 
   await connectMongo();
-  const challenges = await Challenge.find()
-    .select("_id title category points createdAt files") // ✅ never return flagHash
-    .sort({ createdAt: -1 });
+  const list = await Challenge.find({})
+    .sort({ createdAt: -1 })
+    .select("_id title category points startsAt endsAt createdAt updatedAt files");
 
-  return NextResponse.json({ challenges });
+  return NextResponse.json({ challenges: list });
 }
 
 export async function POST(req: Request) {
   const denied = requireAdmin(req);
   if (denied) return denied;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
+
   const title = String(body.title ?? "").trim();
-  const description = String(body.description ?? "").trim();
+  const category = String(body.category ?? "").trim();
+  const description = String(body.description ?? "");
   const points = Number(body.points ?? 0);
-  const category = String(body.category ?? "");
   const flag = String(body.flag ?? "").trim();
 
-  if (!title || title.length < 3) {
-    return NextResponse.json({ error: "Title must be at least 3 characters." }, { status: 400 });
+  // schedule fields (datetime-local strings)
+  const startsAt = new Date(String(body.startsAt));
+  const endsAt = new Date(String(body.endsAt));
+
+  if (!title || title.length < 2 || title.length > 80) {
+    return NextResponse.json({ error: "Title must be 2–80 characters." }, { status: 400 });
   }
-  if (!description || description.length < 5) {
-    return NextResponse.json({ error: "Description is required." }, { status: 400 });
+  if (!CATEGORIES.has(category)) {
+    return NextResponse.json({ error: "Invalid category." }, { status: 400 });
   }
-  if (!Number.isFinite(points) || points < 0) {
-    return NextResponse.json({ error: "Points must be a valid number." }, { status: 400 });
+  if (!Number.isFinite(points) || points <= 0 || points > 10000) {
+    return NextResponse.json({ error: "Points must be 1–10000." }, { status: 400 });
   }
-  if (!flag || flag.length < 4) {
-    return NextResponse.json({ error: "Flag is required." }, { status: 400 });
+  if (!flag || flag.length < 4 || flag.length > 200) {
+    return NextResponse.json({ error: "Flag must be 4–200 characters." }, { status: 400 });
   }
+
+  // ✅ validate schedule
+  if (isNaN(startsAt.getTime()) || isNaN(endsAt.getTime())) {
+    return NextResponse.json({ error: "Invalid start/end time." }, { status: 400 });
+  }
+  if (endsAt <= startsAt) {
+    return NextResponse.json({ error: "End time must be after start time." }, { status: 400 });
+  }
+
+  await connectMongo();
 
   const flagHash = await bcrypt.hash(flag, 10);
 
-  await connectMongo();
-  const ch = await Challenge.create({
+  const created = await Challenge.create({
     title,
+    category,
     description,
     points,
-    category,
     flagHash,
+    startsAt,
+    endsAt,
     files: [],
   });
 
-  // return only safe fields
-  return NextResponse.json(
-    {
-      challenge: {
-        _id: ch._id,
-        title: ch.title,
-        description: ch.description,
-        points: ch.points,
-        category: ch.category,
-        files: ch.files,
-        createdAt: ch.createdAt,
-      },
+  return NextResponse.json({
+    ok: true,
+    challenge: {
+      _id: created._id.toString(),
+      title: created.title,
+      category: created.category,
+      points: created.points,
+      startsAt: created.startsAt,
+      endsAt: created.endsAt,
     },
-    { status: 201 }
-  );
+  });
 }

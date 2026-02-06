@@ -1,22 +1,35 @@
-import mongoose, { Schema, type Model } from "mongoose";
+import mongoose, { Schema, models, model, Types } from "mongoose";
 
-export interface ISolve {
-  userId: string;       // User._id
-  challengeId: string;  // Challenge._id
+export type ISolve = {
+  userId: Types.ObjectId;
+  teamId: Types.ObjectId;
+  challengeId: Types.ObjectId;
+
+  // ✅ points earned (event only)
+  points: number;
+
+  // ✅ which event this solve belongs to
+  eventId: Types.ObjectId;
+
   createdAt?: Date;
   updatedAt?: Date;
-}
+};
 
 const SolveSchema = new Schema<ISolve>(
   {
-    userId: { type: String, required: true, index: true },
-    challengeId: { type: String, required: true, index: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    teamId: { type: Schema.Types.ObjectId, ref: "Team", required: true, index: true },
+    challengeId: { type: Schema.Types.ObjectId, ref: "Challenge", required: true, index: true },
+
+    points: { type: Number, required: true },
+
+    // ✅ IMPORTANT
+    eventId: { type: Schema.Types.ObjectId, ref: "Event", required: true, index: true },
   },
   { timestamps: true }
 );
 
-// one solve per user per challenge
-SolveSchema.index({ userId: 1, challengeId: 1 }, { unique: true });
+// ✅ team can solve a challenge once per event
+SolveSchema.index({ teamId: 1, challengeId: 1, eventId: 1 }, { unique: true });
 
-export const Solve: Model<ISolve> =
-  mongoose.models.Solve || mongoose.model<ISolve>("Solve", SolveSchema);
+export const Solve = models.Solve || model<ISolve>("Solve", SolveSchema);

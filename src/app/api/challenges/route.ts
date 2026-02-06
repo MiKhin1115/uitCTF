@@ -1,26 +1,34 @@
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { connectMongo } from "@/lib/mongodb";
+import { verifySession } from "@/lib/jwt";
+import { Team } from "@/models/Team";
 import { Challenge } from "@/models/Challenge";
-import { Solve } from "@/models/Solve";
-import { requireUser } from "@/lib/requireUser";
 
 export async function GET() {
-  const { session, denied } = await requireUser();
-  if (denied) return denied;
+  const ck = await cookies();
+  const token = ck.get("ctf_token")?.value;
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const session = verifySession(token);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   await connectMongo();
 
-  const challenges = await Challenge.find()
-    .select("_id title description points category files createdAt")
-    .sort({ category: 1, points: 1 });
+  // ✅ Must be participant (in a team)
+  const team = await Team.findOne({ "members.userId": session.id }).select("_id");
+  if (!team) return NextResponse.json({ error: "Join a team first" }, { status: 403 });
 
-  const solves = await Solve.find({ userId: session!.id }).select("challengeId");
-  const solvedSet = new Set(solves.map((s) => s.challengeId));
+  const now = new Date();
 
-  const result = challenges.map((c) => ({
-    ...c.toObject(),
-    solved: solvedSet.has(c._id.toString()),
-  }));
+  const challenges = await Challenge.find({
+    startsAt: { $lte: now },
+    endsAt: { $gte: now },
+  })
+    .sort({ points: 1, createdAt: -1 })
+    .select("_id title category points startsAt endsAt");
 
-  return NextResponse.json({ challenges: result });
+  return NextResponse.json({ challenges });
 }
