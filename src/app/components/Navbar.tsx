@@ -49,7 +49,7 @@ export default function Navbar() {
         {/* Middle nav */}
         <nav className="hidden items-center md:flex">
           <div className="flex items-center gap-12 text-sm font-medium">
-            <a href="#features" className="flex items-center gap-2 text-white/80 hover:text-white transition">
+            <a href="/practice" className="flex items-center gap-2 text-white/80 hover:text-white transition">
               <FaBookOpen className="text-white/60" />
               Practice
             </a>
